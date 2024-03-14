@@ -326,6 +326,24 @@ function run_with_fixed_perturbations(crn, pars_v, pars_l, input, perturbation_l
     return solutions
 end
 
+#CUDA version ?
+# using CUDA, StaticArrays, DiffEqGPU
+# function run_with_fixed_perturbations(crn, pars_v, pars_l, input, perturbation_list, t0, t1)
+#     condition = [t0]
+#     solutions = Array{Any}(undef, length(perturbation_list))
+#     prob = ODEProblem(crn, pars_l.u0, (0., t1), pars_l.p)
+
+#     Threads.@threads for i in 1:length(perturbation_list)
+#         function affect!(integrator)
+#             integrator[:U] = max(0., input + perturbation_list[i])
+#         end
+#         ps_cb = PresetTimeCallback(condition, affect!)
+#         sol = solve(prob, GPUTsit5(), reltol=1e-12, abstol=1e-12, callback=ps_cb)
+#         solutions[i] = sol
+#     end
+#     return solutions
+# end
+
 function run_extended_with_fixed_perturbations(ext_ode, pars_l, input, perturbation_list, t0, t1)
 
     condition = [t0]
@@ -345,6 +363,27 @@ function run_extended_with_fixed_perturbations(ext_ode, pars_l, input, perturbat
     end
     return solutions
 end
+
+#cuda version
+# function run_extended_with_fixed_perturbations(ext_ode, pars_l, input, perturbation_list, t0, t1)
+
+#     condition = [t0]
+#     named_u_p = extend_u0(ext_ode, pars_l.u0, pars_l.p, N)
+#     prob = ODEProblem(ext_ode, named_u_p.u0, (0., t1), named_u_p.p)
+
+#     solutions = Array{Any}(undef, length(perturbation_list))
+
+#     Threads.@threads for i in 1:length(perturbation_list)
+#         perturbation = perturbation_list[i]
+#         function affect!(integrator)
+#             integrator[:U] = max(0., input + perturbation )
+#         end
+#         ps_cb = PresetTimeCallback(condition, affect!)
+#         sol = solve(prob, GPUTsit5(), reltol=1e-12, abstol=1e-12, callback=ps_cb)
+#         solutions[i] = sol
+#     end
+#     return solutions
+# end
 
 
 function state_from_ode(ode, sol, t)
