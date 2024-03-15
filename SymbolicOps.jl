@@ -8,15 +8,19 @@ unsym_dict = (d) -> Dict([unsym(k) => v for (k,v) in d])
 function sensitivity(ode, parameters)
     S = Matrix{Num}(undef, length(equations(ode)), length(parameters)-1)
     for (i, eq) in enumerate(equations(ode))
-        correction = 0
-        for (j, (k, v)) in enumerate(parameters)
-            if isequal(k, :U)
-                correction = 1
-                continue
-            else
-                pos = parse(Int, split(string(k), "_")[2])
-            end
-            S[i, pos] = Symbolics.derivative(eq.rhs, eval(Meta.parse(string(k))))
+        # correction = 0
+        # for (j, (k, v)) in enumerate(parameters)
+        #     if isequal(k, :U)
+        #         correction = 1
+        #         continue
+        #     else
+        #         pos = parse(Int, split(string(k), "_")[2])
+        #     end
+        #     S[i, pos] = Symbolics.derivative(eq.rhs, eval(Meta.parse(string(k))))
+        # end
+
+        for j in 1:length(parameters)-1
+            S[i, j] = Symbolics.derivative(eq.rhs,eval(Meta.parse(string("k_$j"))))
         end
     end
     return S
@@ -50,9 +54,11 @@ function adaptation_loss_symbolic(norm = 1)
     - the absolute error
     """
     if norm == 1
-        return abs(o_t1 - o_t0)
+        L = abs(o_t1 - o_t0) + 10*(0.5 - min(o_t0, 0.5))/(1.0 + (0.5 - min(o_t0, 0.5)))
+        return L/(1.0 + L)
     else
-        return (abs(o_t1 - o_t0)^norm)
+        L = abs(o_t1 - o_t0)^norm #+ (0.5 - min(o_t0, 0.5))^norm
+        return L/(1.0 + L)
     end
     #return 1.0/((abs(o_t1-o_t0)/o_t1)/(dU)) 
 end
@@ -92,9 +98,11 @@ function sensitivity_loss_symbolic(norm = 1)
     - the sensitivity loss
     """
     if norm == 1
-        return p_s - min((abs(o_t0pdt - o_t0)), p_s) #((p_s*dU - min((abs(o_t0pdt - o_t0)), p_s*dU))/dU)*()  # abs(abs(o_t0pdt - o_t0) - p_s)  # abs(abs(o_t0pdt - o_t0) - p_s*dU)
+        L = (p_s - min((abs(o_t0pdt - o_t0)), p_s))
+        return L/(1.0 + L) #((p_s*dU - min((abs(o_t0pdt - o_t0)), p_s*dU))/dU)*()  # abs(abs(o_t0pdt - o_t0) - p_s)  # abs(abs(o_t0pdt - o_t0) - p_s*dU)
     else
-        return ((p_s - min((abs(o_t0pdt - o_t0)), p_s)))^norm # (abs(o_t0pdt - o_t0) - p_s*dU)^norm TODO: check this
+        L = (p_s - min((abs(o_t0pdt - o_t0)), p_s))^norm
+        return L/(1.0 + L) # (abs(o_t0pdt - o_t0) - p_s*dU)^norm TODO: check this
     end
     #return abs(((o_t0pdt - o_t0)/o_t0)/(dU+1.))
 end
@@ -146,9 +154,11 @@ function steady_state_loss_symbolic(norm = 1)
     - the steady state loss
     """
     if norm == 1
-        return sum(abs.(at_t0 - at_t0_d) + abs.(at_t1 - at_t1_d))/2
+        L = sum(abs.(at_t0 - at_t0_d) + abs.(at_t1 - at_t1_d))/2
+        return L/(1.0 + L)
     else
-        return sum(abs.(at_t0 - at_t0_d).^norm) + sum(abs.(at_t1 - at_t1_d).^norm)/2
+        L = sum(abs.(at_t0 - at_t0_d).^norm) + sum(abs.(at_t1 - at_t1_d).^norm)/2
+        return L/(1.0 + L)
     end
 end
 
@@ -188,7 +198,9 @@ function L1_loss_symbolic(N, p)
     """
     np = count_parameters(N)
     p = [Symbolics.variable(k) for (k, v) in p if k != :U]
-    return sum(abs.(values(p)))
+    #return sum(abs.(values(p))) / (1.0 + sum(abs.(values(p))))
+    L = sum(log.(1.0 .+ p))
+    return L/(1.0 + L)
 end
 
 function L1_loss_eval(sym_expr, p)
@@ -455,7 +467,9 @@ function jacobian_pars(ode_sys, loss_data, loss_derivatives, sol, target, t0, t1
         [ evaluated_loss_derivatives[at_t1[i]] for i in 1:length(at_t1)]'*S_t1 +
         [ evaluated_loss_derivatives[at_t0_d[i]] for i in 1:length(at_t0_d)]'*sensitivity_from_ode(ode_sys, sol, t0*f_ss) +
         [ evaluated_loss_derivatives[at_t1_d[i]] for i in 1:length(at_t1_d)]'*sensitivity_from_ode(ode_sys, sol, t0+(t1-t0)*f_ss)
-    L1_reg = loss_data[3].weight.*sign.(pars) # TODO hardcoded
+
+    #L1_reg = loss_data[3].weight.*sign.(pars)/((1.0+sum(abs.(pars))).^2) # TODO hardcoded (and changed to 1/(1+|x|))
+    L1_reg = loss_data[3].weight./(1.0.+pars)./((1.0.+log.(1.0 .+ pars)).^2) # lograrithmic regularization 
 
     total_sensitivity = vec(sensitivities) + vec(L1_reg)
     return (
