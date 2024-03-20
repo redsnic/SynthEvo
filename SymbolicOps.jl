@@ -7,6 +7,8 @@ unsym_dict = (d) -> Dict([unsym(k) => v for (k,v) in d])
 
 function sensitivity(ode, parameters)
     S = Matrix{Num}(undef, length(equations(ode)), length(parameters)-1)
+    J =  Matrix{Num}(undef, N, N)
+    V = Matrix{Num}(undef, length(equations(ode)), length(parameters)-1)
     for (i, eq) in enumerate(equations(ode))
         # correction = 0
         # for (j, (k, v)) in enumerate(parameters)
@@ -22,8 +24,17 @@ function sensitivity(ode, parameters)
         for j in 1:length(parameters)-1
             S[i, j] = Symbolics.derivative(eq.rhs,eval(Meta.parse(string("k_$j"))))
         end
+        # jacobian 3x3
+        for j in 1:N
+            J[i, j] = Symbolics.derivative(eq.rhs,eval(Meta.parse(string("x_$j"))))
+        end
+
+        for j in 1:length(parameters)-1
+            V[i, j] = eval(Meta.parse(string("ks_$(i)_$j")))
+        end
+
     end
-    return S
+    return S + J*V
 end
         
 # adaptation_loss variables
@@ -197,7 +208,7 @@ function L1_loss_symbolic(N, p)
     - the L1 norm
     """
     np = count_parameters(N)
-    p = [Symbolics.variable(k) for (k, v) in p if k != :U]
+    p = [Symbolics.variable(k) for (k, v) in p if k != :U && k != :k_29] # exclude x_3 degradation rate 
     #return sum(abs.(values(p))) / (1.0 + sum(abs.(values(p))))
     L = sum(log.(1.0 .+ p))
     return L/(1.0 + L)
@@ -470,6 +481,7 @@ function jacobian_pars(ode_sys, loss_data, loss_derivatives, sol, target, t0, t1
 
     #L1_reg = loss_data[3].weight.*sign.(pars)/((1.0+sum(abs.(pars))).^2) # TODO hardcoded (and changed to 1/(1+|x|))
     L1_reg = loss_data[3].weight./(1.0.+pars)./((1.0.+log.(1.0 .+ pars)).^2) # lograrithmic regularization 
+    L1_reg[29] = 0. # exclude x_3 degradation rate
 
     total_sensitivity = vec(sensitivities) + vec(L1_reg)
     return (
