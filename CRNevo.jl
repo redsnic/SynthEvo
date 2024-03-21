@@ -151,14 +151,14 @@ end
 ### 
 
 # in this 
-function symbolic_evolve_NFB(crn, loss_function_ga, state, dp, genetic_pool_size, death_rate, mutation_rate, gradient_mutation_rate, follow_gd_fun, duplication_rate, crossover_rate, p_cross, output_degradation_parameter, minimal_degradation_rate)
+function symbolic_evolve_NFB(crn, loss_function_ga, state, dp, genetic_pool_size, death_rate, mutation_rate, gradient_mutation_rate, follow_gd_fun, duplication_rate, crossover_rate, p_cross)
     np = length(state.pool[1])
     Threads.@threads for i in 1:length(state.pool)
         if is_updated[i]
             continue
         end
         # keep output degradation active
-        state.pool[i][output_degradation_parameter] = max.(minimal_degradation_rate, state.pool[i][output_degradation_parameter])
+        #state.pool[i][output_degradation_parameter] = max.(minimal_degradation_rate, state.pool[i][output_degradation_parameter])
         state.fitness[i] = loss_function_ga(state.pool[i])
         state.is_updated[i] = true
     end
@@ -170,10 +170,6 @@ function symbolic_evolve_NFB(crn, loss_function_ga, state, dp, genetic_pool_size
 
     function perturb(dp, np)
         return dp .* rand(np) .- (dp/2)
-    end
-
-    function perturb1(dp)
-        return dp .* rand()# .- (dp/2)
     end
     
     for i in ranked_pool
@@ -204,7 +200,7 @@ function symbolic_evolve_NFB(crn, loss_function_ga, state, dp, genetic_pool_size
             clone_detination = rand(i+1:length(ranked_pool)) # replace only worse outcomes
             state.pool[ranked_pool[clone_detination]][:] .= state.pool[i]
             state.fitness[ranked_pool[clone_detination]] = state.fitness[i]
-            state.pool[ranked_pool[clone_detination]][:] .= max.(0, perturb(dp*2, np) + state.pool[i]) # strong mutation
+            #state.pool[ranked_pool[clone_detination]][:] .= max.(0, perturb(dp*2, np) + state.pool[i]) # strong mutation
             state.is_updated[ranked_pool[clone_detination]] = false
         # crossover
         elseif p < crossover_rate(i/length(ranked_pool))
@@ -214,11 +210,6 @@ function symbolic_evolve_NFB(crn, loss_function_ga, state, dp, genetic_pool_size
             state.pool[i][:] .= ((1 .- crossover_mask)*state.pool[i]) + state.pool[ranked_pool[crossover_mate]]*crossover_mask
             state.is_updated[i] = false
         end
-
-        # fully random degradation rate
-        state.pool[i][output_degradation_parameter] = minimal_degradation_rate + perturb1(1.) # + state.pool[i][output_degradation_parameter])
-        state.is_updated[i] = false
-
     end
     return state
 end
