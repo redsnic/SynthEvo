@@ -7,6 +7,8 @@ unsym_dict = (d) -> Dict([unsym(k) => v for (k,v) in d])
 
 function sensitivity(ode, parameters)
     S = Matrix{Num}(undef, length(equations(ode)), length(parameters)-1)
+    J =  Matrix{Num}(undef, N, N)
+    V = Matrix{Num}(undef, length(equations(ode)), length(parameters)-1)
     for (i, eq) in enumerate(equations(ode))
         # correction = 0
         # for (j, (k, v)) in enumerate(parameters)
@@ -22,8 +24,17 @@ function sensitivity(ode, parameters)
         for j in 1:length(parameters)-1
             S[i, j] = Symbolics.derivative(eq.rhs,eval(Meta.parse(string("k_$j"))))
         end
+        # jacobian 3x3
+        for j in 1:N
+            J[i, j] = Symbolics.derivative(eq.rhs,eval(Meta.parse(string("x_$j"))))
+        end
+
+        for j in 1:length(parameters)-1
+            V[i, j] = eval(Meta.parse(string("ks_$(i)_$j")))
+        end
+
     end
-    return S
+    return S + J*V
 end
         
 # adaptation_loss variables
@@ -54,10 +65,20 @@ function adaptation_loss_symbolic(norm = 1)
     - the absolute error
     """
     if norm == 1
-        L = abs(o_t1 - o_t0) + 10*(0.5 - min(o_t0, 0.5))/(1.0 + (0.5 - min(o_t0, 0.5)))
-        return L/(1.0 + L)
+        #L = ifelse( dU < 1.0 , ((at_t0[3] - at_t1[3])/at_t0[3])^2, Num(0.) )  # not less then 0.5
+        #L =  ifelse( dU < 1.0 , (max(0.,(at_t1[3] - 0.5)^3)), Num(0.) ) 
+        #L2 = 10*abs(at_t0[3] - 0.5) # (0.25 - min(abs(at_t0[3]), 0.25))
+        #return L/(1.0 + L) + L2/(1.0 + L2)
+        #return L + L2 
+        L =  ifelse(dU < 0.0,
+            (at_t1[3]-0.25)^2,
+            Num(0.) ) 
+              
+        #L2 = (at_t0[3]-0.25)^2
+        return L #+ L2
     else
-        L = abs(o_t1 - o_t0)^norm #+ (0.5 - min(o_t0, 0.5))^norm
+        # not implemented
+        L = 0/0
         return L/(1.0 + L)
     end
     #return 1.0/((abs(o_t1-o_t0)/o_t1)/(dU)) 
@@ -78,11 +99,12 @@ function adaptation_loss_eval(sym_expr, sol, target, t0, t1)
     Returns:
     - the absolute error
     """
-    return substitute(sym_expr, Dict(
-        o_t0 => sol(t0, idxs=x_3),
-        o_t1 => sol(t1, idxs=x_3),
-        dU => abs(sol(t0-1., idxs=U) - sol(t0+1., idxs=U))
-    ))
+    vars = [x_1, x_2, x_3]
+    return substitute(sym_expr, Dict([
+        [at_t0[i] => sol(t0, idxs=vars[i]) for i in 1:length(at_t0)];
+        [at_t1[i] => sol(t1, idxs=vars[i]) for i in 1:length(at_t1)];
+        [dU => sol(t0+1., idxs=U) - sol(t0-1., idxs=U)]
+    ]))
 end
 
 function sensitivity_loss_symbolic(norm = 1)
@@ -98,10 +120,14 @@ function sensitivity_loss_symbolic(norm = 1)
     - the sensitivity loss
     """
     if norm == 1
-        L = (p_s - min((abs(o_t0pdt - o_t0)), p_s))
-        return L/(1.0 + L) #((p_s*dU - min((abs(o_t0pdt - o_t0)), p_s*dU))/dU)*()  # abs(abs(o_t0pdt - o_t0) - p_s)  # abs(abs(o_t0pdt - o_t0) - p_s*dU)
+        #L = ifelse(dU >= 1., -((at_t0[3] - at_t1[3])/at_t0[3])^2, Num(0.))
+        L = ifelse(dU >= 0., 
+            ((at_t1[3]-0.75)^2),
+        Num(0.))
+        return L # L/(1.0 + L) #((p_s*dU - min((abs(o_t0pdt - o_t0)), p_s*dU))/dU)*()  # abs(abs(o_t0pdt - o_t0) - p_s)  # abs(abs(o_t0pdt - o_t0) - p_s*dU)
     else
-        L = (p_s - min((abs(o_t0pdt - o_t0)), p_s))^norm
+        # not implemented
+        #L = (p_s - min((abs(o_t0pdt - o_t0)), p_s))^norm
         return L/(1.0 + L) # (abs(o_t0pdt - o_t0) - p_s*dU)^norm TODO: check this
     end
     #return abs(((o_t0pdt - o_t0)/o_t0)/(dU+1.))
@@ -123,12 +149,16 @@ function sensitivity_loss_eval(sym_expr, sol, target, t0, delta_t, proportion)
     Returns:
     - the sensitivity loss
     """
-    return substitute(sym_expr, Dict(
-        o_t0 => sol(t0)[target],
-        o_t0pdt => sol(t0+delta_t)[target],
-        o_t1 => sol(t1)[target],
-        dU => abs(sol(t0-1., idxs=U) - sol(t0+1., idxs=U)),
-        p_s => proportion
+    vars = [x_1, x_2, x_3]
+    return substitute(sym_expr, Dict([
+        [at_t0[i] => sol(t0, idxs=vars[i]) for i in 1:length(at_t0)];
+        [at_t1[i] => sol(t1, idxs=vars[i]) for i in 1:length(at_t1)];
+        #o_t0 => sol(t0)[target],
+        #o_t0pdt => sol(t0+delta_t)[target],
+        #o_t1 => sol(t1)[target],
+        [dU => (sol(t0+1., idxs=U) - sol(t0-1., idxs=U)),
+        p_s => proportion]
+    ]
     ))
 end
 
@@ -154,11 +184,11 @@ function steady_state_loss_symbolic(norm = 1)
     - the steady state loss
     """
     if norm == 1
-        L = sum(abs.(at_t0 - at_t0_d) + abs.(at_t1 - at_t1_d))/2
-        return L/(1.0 + L)
+        L = sum((at_t0 - at_t0_d).^2 + (at_t1 - at_t1_d).^2)
+        return L# /(1.0 + L)
     else
-        L = sum(abs.(at_t0 - at_t0_d).^norm) + sum(abs.(at_t1 - at_t1_d).^norm)/2
-        return L/(1.0 + L)
+        L = sum(abs.(at_t0 - at_t0_d).^norm) + sum(abs.(at_t1 - at_t1_d).^norm)
+        return L /(1.0 + L)
     end
 end
 
@@ -199,8 +229,8 @@ function L1_loss_symbolic(N, p)
     np = count_parameters(N)
     p = [Symbolics.variable(k) for (k, v) in p if k != :U]
     #return sum(abs.(values(p))) / (1.0 + sum(abs.(values(p))))
-    L = sum(log.(1.0 .+ p))
-    return L/(1.0 + L)
+    L = sum(p) #sum(log.(1.0 .+ p))
+    return L#/(1.0 + L)
 end
 
 function L1_loss_eval(sym_expr, p)
@@ -428,30 +458,25 @@ function sensitivity_from_ode(ode, sol, t) # TODO linkerlinker FASTER VERSION!
 end
 
 
-function jacobian_pars(ode_sys, loss_data, loss_derivatives, sol, target, t0, t1, pars, f_ss, sensitivity_offset, original_variables)
+function jacobian_pars(ode_sys, loss_data, loss_derivatives, sol, target, t0, t1, pars_v, pars_l, f_ss, sensitivity_offset, original_variables)
     fwd_pass = Dict([
-        [
-            o_t0 => sol(t0, idxs=original_variables[target]),
-            o_t1 => sol(t1, idxs=original_variables[target]),
-            o_t0pdt => sol(t0+sensitivity_offset, idxs=original_variables[target])
-        ]
+        # [
+        #     o_t0 => sol(t0, idxs=original_variables[target]),
+        #     o_t1 => sol(t1, idxs=original_variables[target]),
+        #     o_t0pdt => sol(t0+sensitivity_offset, idxs=original_variables[target])
+        # ]
         [at_t0[i] => sol(t0, idxs=original_variables[i]) for i in 1:length(at_t0)];
         [at_t1[i] => sol(t1, idxs=original_variables[i]) for i in 1:length(at_t1)];
         [at_t0_d[i] => sol(t0*f_ss, idxs=original_variables[i]) for i in 1:length(at_t0_d)];
         [at_t1_d[i] => sol(t0+(t1-t0)*f_ss, idxs=original_variables[i]) for i in 1:length(at_t1_d)];
         #other params 
         [
-            dU => abs(sol(t0-0.5, idxs=U) - sol(t0+0.5, idxs=U)),
+            dU => (sol(t0+1., idxs=U) - sol(t0-1., idxs=U)),
             p_s => sensitivity_offset
         ];
         [ w[i] => loss_data[i].weight for i in 1:length(loss_data)];
     ])
     evaluated_loss_derivatives = Dict([
-        [
-            o_t0 => Symbolics.substitute(loss_derivatives[o_t0], fwd_pass),
-            o_t1 => Symbolics.substitute(loss_derivatives[o_t1], fwd_pass),
-            o_t0pdt => Symbolics.substitute(loss_derivatives[o_t0pdt], fwd_pass)
-        ]
         [at_t0[i] => Symbolics.substitute(loss_derivatives[at_t0[i]], fwd_pass) for i in 1:length(at_t0)];
         [at_t1[i] => Symbolics.substitute(loss_derivatives[at_t1[i]], fwd_pass) for i in 1:length(at_t1)];
         [at_t0_d[i] => Symbolics.substitute(loss_derivatives[at_t0_d[i]], fwd_pass) for i in 1:length(at_t0_d)];
@@ -460,23 +485,35 @@ function jacobian_pars(ode_sys, loss_data, loss_derivatives, sol, target, t0, t1
     S_t0 = sensitivity_from_ode(ode_sys, sol, t0)
     S_t1 = sensitivity_from_ode(ode_sys, sol, t1)
     sensitivities =  # could have used get_S
-        [ i!=target ? 0. : evaluated_loss_derivatives[o_t0] for i in 1:length(at_t0)]'*S_t0 +
-        [ i!=target ? 0. : evaluated_loss_derivatives[o_t1] for i in 1:length(at_t0)]'*S_t1 +
-        [ i!=target ? 0. : evaluated_loss_derivatives[o_t0pdt] for i in 1:length(at_t0)]'*sensitivity_from_ode(ode_sys, sol, t0+sensitivity_offset) +
+        # [ i!=target ? 0. : evaluated_loss_derivatives[o_t0] for i in 1:length(at_t0)]'*S_t0 +
+        # [ i!=target ? 0. : evaluated_loss_derivatives[o_t1] for i in 1:length(at_t0)]'*S_t1 +
+        # [ i!=target ? 0. : evaluated_loss_derivatives[o_t0pdt] for i in 1:length(at_t0)]'*sensitivity_from_ode(ode_sys, sol, t0+sensitivity_offset) +
         [ evaluated_loss_derivatives[at_t0[i]] for i in 1:length(at_t0)]'*S_t0 +
         [ evaluated_loss_derivatives[at_t1[i]] for i in 1:length(at_t1)]'*S_t1 +
         [ evaluated_loss_derivatives[at_t0_d[i]] for i in 1:length(at_t0_d)]'*sensitivity_from_ode(ode_sys, sol, t0*f_ss) +
         [ evaluated_loss_derivatives[at_t1_d[i]] for i in 1:length(at_t1_d)]'*sensitivity_from_ode(ode_sys, sol, t0+(t1-t0)*f_ss)
 
     #L1_reg = loss_data[3].weight.*sign.(pars)/((1.0+sum(abs.(pars))).^2) # TODO hardcoded (and changed to 1/(1+|x|))
-    L1_reg = loss_data[3].weight./(1.0.+pars)./((1.0.+log.(1.0 .+ pars)).^2) # lograrithmic regularization 
+    L1_reg = loss_data[3].weight*sign.(pars_v) #./(1.0.+pars_v)./((1.0.+log.(1.0 .+ pars_v)).^2) # lograrithmic regularization 
 
     total_sensitivity = vec(sensitivities) + vec(L1_reg)
+
+    # compute here the loss directly
+    loss = 0
+    loss_array = []
+    for i in 1:length(loss_data)
+        loss_el = Symbolics.substitute(loss_data[i].sym, merge(fwd_pass, unsym_dict(pars_l.p))).val*loss_data[i].weight
+        loss += loss_el
+        push!(loss_array, loss_el)
+    end
+
     return (
         sensitivity = total_sensitivity,
         derivatives_of_loss = evaluated_loss_derivatives,
         regularization_term = L1_reg,
-        fwd_pass = fwd_pass
+        fwd_pass = fwd_pass,
+        loss = loss,
+        loss_array = loss_array
     )
 end
 
@@ -540,11 +577,11 @@ end
 function compute_symbolic_derivatives_of_loss(symbolic_loss)
     # the variables are assumed to be in the global environment
     loss_derivatives = Dict([
-        [
-            o_t0 => (Symbolics.derivative(symbolic_loss, o_t0)),
-            o_t1 => (Symbolics.derivative(symbolic_loss, o_t1)),
-            o_t0pdt => (Symbolics.derivative(symbolic_loss, o_t0pdt))
-        ]
+        # [
+        #     o_t0 => (Symbolics.derivative(symbolic_loss, o_t0)),
+        #     o_t1 => (Symbolics.derivative(symbolic_loss, o_t1)),
+        #     o_t0pdt => (Symbolics.derivative(symbolic_loss, o_t0pdt))
+        # ]
         [at_t0[i] => Symbolics.derivative(symbolic_loss, at_t0[i]) for i in 1:length(at_t0)];
         [at_t1[i] => Symbolics.derivative(symbolic_loss, at_t1[i]) for i in 1:length(at_t1)];
         [at_t0_d[i] => Symbolics.derivative(symbolic_loss, at_t0_d[i]) for i in 1:length(at_t0_d)];
@@ -596,29 +633,28 @@ function symbolic_gradient_descent(p0, crn_info, gd_options, gd_perturbation_opt
                 # profiling @(100, 5) ~ 0s 
                 loss_args = update_args(sol, crn_info.target, gd_perturbation_options.t0, gd_perturbation_options.t1, pars_l, loss_args, gd_loss_options.p, gd_loss_options.d, gd_loss_options.f_ss)   # prepare the input for the next step
                 # profiling @(100, 5) ~ 3s
-                if gd_options.verbose
-                    loss = total_loss_eval(loss_args)
-                    loss_tape[end] += loss.total.val                        # record the loss
-                    loss_tape_array[end] += loss.array
-                end
                 # symbolically "backpropagate"
                 # profiling @(100, 5) ~ 3s
-                jacobian = jacobian_pars(crn_info.ext_ode, loss_args, gd_options.symbolic_derivatives_of_los, sol, crn_info.N, gd_perturbation_options.t0, gd_perturbation_options.t1, pars_v, gd_loss_options.f_ss, gd_loss_options.d, [[Symbol("x_$(i)") for i in 1:N]..., Symbol("U")])
+                jacobian = jacobian_pars(crn_info.ext_ode, loss_args, gd_options.symbolic_derivatives_of_los, sol, crn_info.N, gd_perturbation_options.t0, gd_perturbation_options.t1, pars_v, pars_l, gd_loss_options.f_ss, gd_loss_options.d, [[Symbol("x_$(i)") for i in 1:N]..., Symbol("U")])
                 # profiling @(100, 5) ~ 1s
                 gradient += vec([v.val for v in jacobian.sensitivity])  # check efficiency with symbolic operations (maybe we have to use "real" types directly)
+            
+                if gd_options.verbose
+                    loss_tape[end] += jacobian.loss                         # record the loss
+                    loss_tape_array[end] = loss_tape_array[end] + jacobian.loss_array
+                end
             end
         else
             solutions = run_extended_with_fixed_perturbations(crn_info.ext_ode, pars_l, gd_perturbation_options.input, gd_perturbation_options.perturbation_list, gd_perturbation_options.t0, gd_perturbation_options.t1)
             for sol in solutions
                 loss_args = update_args(sol, crn_info.target, gd_perturbation_options.t0, gd_perturbation_options.t1, pars_l, loss_args, gd_loss_options.p, gd_loss_options.d, gd_loss_options.f_ss)   # prepare the input for the next step
-                if gd_options.verbose
-                    loss = total_loss_eval(loss_args)
-                    loss_tape[end] = loss_tape[end] + loss.total.val              # record the loss
-                    loss_tape_array[end] = loss_tape_array[end] + loss.array
-                end
                 # symbolically "backpropagate"
-                jacobian = jacobian_pars(crn_info.ext_ode, loss_args, gd_options.symbolic_derivatives_of_loss, sol, crn_info.N, gd_perturbation_options.t0, gd_perturbation_options.t1, pars_v, gd_loss_options.f_ss, gd_loss_options.d, [[Symbol("x_$(i)") for i in 1:N]..., Symbol("U")])
+                jacobian = jacobian_pars(crn_info.ext_ode, loss_args, gd_options.symbolic_derivatives_of_loss, sol, crn_info.N, gd_perturbation_options.t0, gd_perturbation_options.t1, pars_v, pars_l, gd_loss_options.f_ss, gd_loss_options.d, [[Symbol("x_$(i)") for i in 1:N]..., Symbol("U")])
                 gradient += vec([v.val for v in jacobian.sensitivity])  # check efficiency with symbolic operations (maybe we have to use "real" types directly)
+                if gd_options.verbose
+                    loss_tape[end] += jacobian.loss                         # record the loss
+                    loss_tape_array[end] = loss_tape_array[end] + jacobian.loss_array
+                end
             end
         end
         if gd_options.use_random_perturbation
@@ -648,6 +684,8 @@ function symbolic_gradient_descent(p0, crn_info, gd_options, gd_perturbation_opt
                 gradient /= m
             end
         end
+        max_gradient = maximum(abs.(gradient))
+        gradient = gradient + max_gradient/100.0.*randn(length(gradient)) .- max_gradient/200 # add some noise to the gradient
         if gd_options.use_adagrad
             lr = adagrad_update_get_coefficient(pars_v, gradient, grad_history_ada, gd_options.alpha)
             if gd_options.verbose

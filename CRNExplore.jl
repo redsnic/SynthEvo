@@ -444,12 +444,12 @@ function adagrad_update_get_coefficient(p, g, h, lr, eps=1e-8)
     return (lr)./(sqrt.(h) .+ eps)
 end
 
-function ADAM_update_get_coefficient(p, g, m, v, lr, iter, beta1=0.9, beta2=0.9, eps=1e-3)
+function ADAM_update_get_coefficient(p, g, m, v, lr, iter, beta1=0.9, beta2=0.9, eps=1e-6)
     m[:] = beta1.*m + ((1-beta1).*g)
     v[:] = beta2.*v + ((1-beta2).*(g.^2))
     m_hat = m./(1-beta1^(iter))
     v_hat = v./(1-beta2^(iter))
-    return lr.*(m_hat./sqrt.(v_hat) .+ eps)
+    return lr.*(m_hat./(sqrt.(v_hat) .+ eps))
 end
 
 
