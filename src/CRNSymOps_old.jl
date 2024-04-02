@@ -6,9 +6,11 @@ unsym = (x) -> eval(Meta.parse(string(x)))
 unsym_dict = (d) -> Dict([unsym(k) => v for (k,v) in d])
 
 function sensitivity(ode, parameters)
-    S = Matrix{Num}(undef, length(equations(ode)), length(parameters)-1)
-    J =  Matrix{Num}(undef, N, N)
-    V = Matrix{Num}(undef, length(equations(ode)), length(parameters)-1)
+
+    S = Matrix{Num}(undef, length(equations(ode)), length(parameters)-1) # d(X)/d(theta)
+    J = Matrix{Num}(undef, N, N) # jacobian
+    V = Matrix{Num}(undef, length(equations(ode)), length(parameters)-1) # d(X)/(d(theta)dt)
+
     for (i, eq) in enumerate(equations(ode))
         # correction = 0
         # for (j, (k, v)) in enumerate(parameters)
