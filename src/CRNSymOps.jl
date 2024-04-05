@@ -111,9 +111,9 @@ function sensitivity_from_ode(C::CRN, sol, t)
     column = 0
     for i in 1:C.N
         for j in 1:C.number_of_parameters
-            m[line+1,column+1] = v[ (line)*C.number_of_parameters + (column) + C.N + 2 ]
+            m[line+1,column+1] = v[ (line)*C.number_of_parameters + (column) + C.N + 1 + 1 ] # todo Multiple inputs
             line += 1
-            if line == N
+            if line == C.N
                 line = 0
                 column += 1
             end
