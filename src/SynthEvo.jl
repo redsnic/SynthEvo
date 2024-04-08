@@ -1,6 +1,6 @@
 module SynthEvo
 
-using DifferentialEquations, RecursiveArrayTools, DiffEqParamEstim, StaticArrays
+using DifferentialEquations, RecursiveArrayTools, DiffEqParamEstim, StaticArrays, ModelingToolkit
 #using Optimization, ForwardDiff, OptimizationOptimJL, OptimizationBBO, OptimizationMOI, Ipopt
 #using CSV, DataFrames, 
 using Catalyst, Combinatorics, GraphViz, Symbolics, Plots

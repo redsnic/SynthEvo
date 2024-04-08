@@ -81,6 +81,47 @@ function perturbation_events(input, perturbation_list)
     return [[input + rand()*p - p/2] for p in perturbation_list]
 end
 
+# function dictator(C, p)
+#     dict = Dict()
+#     for i in 1:length(C.parameters)
+#         dict[C.parameters[i]] = p[i]
+#     end
+#     return dict
+# end
+
+# using ModelingToolkit
+
+# function reorder(C, par_v)
+#     dict = Dict()
+#     for i in 1:length(ModelingToolkit.parameters(C.ext_ode))
+#         dict[ModelingToolkit.parameters(C.ext_ode)[i]] = par_v[i]
+#     end
+#     out = []
+#     for i in 1:length(C.parameters)
+#         push!(out, dict[C.parameters[i]])
+#     end
+#     return out
+# end
+
+
+# function dictator_u(C, u)
+#     dict = Dict()
+#     for i in 1:length(C.species)
+#         dict[C.species[i]] = u[i]
+#     end
+#     for i in 1:length(C.control)
+#         dict[C.control[i]] = u[i+length(C.species)]
+#     end
+
+#     for i in 1:size(C.sensitivity_variables)[1]
+#         for j in 1:size(C.sensitivity_variables)[2]
+#             dict[C.sensitivity_variables[i,j]] = u[(i-1)*size(C.sensitivity_variables)[1]+j+length(C.species)+length(C.control)]
+#         end
+#     end
+#     println(dict)
+#     return dict
+# end
+
 function make_base_problem(C, ode, state0, control0, parameters, t_shared, verbose=true, where0=nothing)
     """
     Assemble an ODEProblem from an ODE definition and the required parameters.
@@ -97,7 +138,7 @@ function make_base_problem(C, ode, state0, control0, parameters, t_shared, verbo
     Returns:
     - the ODEProblem
     """
-    return ODEProblem(ode, vcat(state0[1:C.N], control0..., state0[C.N+1:end]), (0., t_shared), parameters, saveat=verbose ? true : where0, save_everystep=verbose)
+    return ODEProblem(ode, vcat(state0[1:C.N], control0..., state0[C.N+1:end]), (0., t_shared), C.to_hidden_order(parameters), saveat=verbose ? true : where0, save_everystep=verbose)
 end
 
 function run_SF_CPU(C, base_problem, t_shared, t_unique, controls, reltol=1e-12, abstol=1e-12, verbose=true, where1=nothing)

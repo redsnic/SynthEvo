@@ -11,6 +11,30 @@ mutable struct FullyConnectedCRN <: CRN
     crn::Union{Nothing, ReactionSystem}
     ode::Union{Nothing, ODESystem}
     ext_ode::Union{Nothing, ODESystem}
+    to_visible_order_indexes::Union{Nothing,Vector{Int64}}
+    to_hidden_order_indexes::Union{Nothing,Vector{Int64}}
+    to_visible_order::Union{Nothing,Function}
+    to_hidden_order::Union{Nothing,Function}
+end
+
+function reorder2visible(C, par_v)
+    dict = Dict()
+    for i in 1:C.number_of_parameters
+        dict[ModelingToolkit.parameters(C.ext_ode)[i]] = par_v[i]
+    end
+    out = []
+    for i in 1:C.number_of_parameters
+        push!(out, dict[C.parameters[i]])
+    end
+    return out
+end
+
+function reorder2hidden(visible_order)
+    out = zeros(length(visible_order))
+    for i in 1:length(visible_order)
+        out[visible_order[i]] = i
+    end
+    return out
 end
 
 
@@ -32,11 +56,17 @@ function make_FullyConnectedNonExplosive_CRN(N::Int)
     @parameters k[1:np]
     @variables ks(t)[1:N, 1:np]
     
-    C = FullyConnectedCRN(N, t, x, U, k, np, ks, nothing, nothing, nothing)
+    C = FullyConnectedCRN(N, t, x, U, k, np, ks, nothing, nothing, nothing, nothing, nothing, nothing, nothing)
     C.crn = create_reactions(C)
     C.ode = convert(ODESystem, C.crn)
     C.ode = add_control_equations(C, [U])
     C.ext_ode = make_sensitivity_ode(C)
+ 
+    C.to_visible_order_indexes = reorder2visible(C, 1:np)
+    C.to_hidden_order_indexes = reorder2hidden(C.to_visible_order_indexes)
+
+    C.to_visible_order = (p) -> p[C.to_visible_order_indexes]
+    C.to_hidden_order = (p) -> p[C.to_hidden_order_indexes]
 
     return C
 end
