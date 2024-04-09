@@ -1,16 +1,23 @@
 using Combinatorics
 
+# use this as the most general example for possible CRN models
+
 mutable struct FullyConnectedCRN <: CRN
-    N::Int
+    N::Int # number of species
+    # symbolic variables
     time::Num
     species::Symbolics.Arr{Num, 1}
     control::Num
     parameters::Symbolics.Arr{Num, 1}
     number_of_parameters::Int
     sensitivity_variables::Symbolics.Arr{Num, 2}
+    # Catalyst crn
     crn::Union{Nothing, ReactionSystem}
+    # transformed crn to ODE
     ode::Union{Nothing, ODESystem}
+    # transformed crn extended to sensitivity ODE
     ext_ode::Union{Nothing, ODESystem}
+    # conversion for convert(ODESystem, C.crn) parameter reordering
     to_visible_order_indexes::Union{Nothing,Vector{Int64}}
     to_hidden_order_indexes::Union{Nothing,Vector{Int64}}
     to_visible_order::Union{Nothing,Function}
@@ -18,6 +25,18 @@ mutable struct FullyConnectedCRN <: CRN
 end
 
 function reorder2visible(C, par_v)
+    """
+    Reorder the parameters to the visible order
+    (this is currently unused)
+
+    Args:
+
+    - C: the CRN model
+    - par_v: the parameters
+
+    Returns:
+    - the reordered parameters (as permuation indexes)
+    """
     dict = Dict()
     for i in 1:C.number_of_parameters
         dict[ModelingToolkit.parameters(C.ext_ode)[i]] = par_v[i]
@@ -30,6 +49,16 @@ function reorder2visible(C, par_v)
 end
 
 function reorder2hidden(visible_order)
+    """
+    Reorder the parameters to the hidden order 
+
+    Args:
+
+    - visible_order: the visible order
+
+    Returns:
+    - the hidden order (as permuation indexes)
+    """
     out = zeros(length(visible_order))
     for i in 1:length(visible_order)
         out[visible_order[i]] = i
@@ -61,10 +90,12 @@ function make_FullyConnectedNonExplosive_CRN(N::Int)
     C.ode = convert(ODESystem, C.crn)
     C.ode = add_control_equations(C, [U])
     C.ext_ode = make_sensitivity_ode(C)
- 
+    
+    # compute hidden (ODE) and visible (CRN) parameter order
     C.to_visible_order_indexes = reorder2visible(C, 1:np)
     C.to_hidden_order_indexes = reorder2hidden(C.to_visible_order_indexes)
 
+    # interfaces
     C.to_visible_order = (p) -> p[C.to_visible_order_indexes]
     C.to_hidden_order = (p) -> p[C.to_hidden_order_indexes]
 
@@ -130,7 +161,6 @@ function count_parameters_FullyConnectedNonExplosive(N::Int)
     res += length(with_replacement_combinations(1:N, 2))*length(with_replacement_combinations(1:N, 2)) - length(with_replacement_combinations(1:N, 2)) # remove X+Y -> X+Y
     return res
 end
-
 
 
 function create_reactions(C::FullyConnectedCRN)

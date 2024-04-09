@@ -78,7 +78,7 @@ end
 # end
 
 function perturbation_events(input, perturbation_list)
-    return [[input + rand()*p - p/2] for p in perturbation_list]
+    return [max.(0, [input + rand()*p - p/2]) for p in perturbation_list]
 end
 
 # function dictator(C, p)
@@ -177,8 +177,8 @@ end
 
 function runp_SF_CPU(C, base_problem, parameter_sets, t_shared, t_unique, controls, reltol=1e-12, abstol=1e-12, verbose=true, where1=nothing)
     """
-    More efficient implementation of the simulation when a step function is applied at a fized time as input perturbation
-    This version operates on parameter sets
+    More efficient implementation of the simulation when a step function is applied at a fixed time as input perturbation
+    This version operates on parameter sets.
 
     Args:
     - `C`: the CRN object
@@ -199,7 +199,7 @@ function runp_SF_CPU(C, base_problem, parameter_sets, t_shared, t_unique, contro
     
     out = Array{Any}(undef, length(parameter_sets))
     for j in 1:length(parameter_sets)
-        unperturbed_problem = remake(base_problem, p=parameter_sets[j])
+        unperturbed_problem = remake(base_problem, p=C.to_hidden_order(parameter_sets[j]))
         unperturbed_solution = solve(unperturbed_problem, Tsit5(), reltol=reltol, abstol=abstol)
         solutions = Array{Any}(undef, length(controls))
         
@@ -219,5 +219,14 @@ end
 ### Other utilities
 
 function vec2mat(v)
+    """
+    Convert a vector to a (1xN) matrix
+
+    Args:
+    - `v`: the vector
+
+    Returns:
+    - the matrix
+    """
     return mapreduce(permutedims, vcat, v)
 end

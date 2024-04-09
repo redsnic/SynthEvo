@@ -1,8 +1,6 @@
 module SynthEvo
 
-using DifferentialEquations, RecursiveArrayTools, DiffEqParamEstim, StaticArrays, ModelingToolkit
-#using Optimization, ForwardDiff, OptimizationOptimJL, OptimizationBBO, OptimizationMOI, Ipopt
-#using CSV, DataFrames, 
+using DifferentialEquations, RecursiveArrayTools, DiffEqParamEstim, StaticArrays, ModelingToolkit, LinearAlgebra, Statistics 
 using Catalyst, Combinatorics, GraphViz, Symbolics, Plots
 
 abstract type CRN end
@@ -12,8 +10,9 @@ include("CRNOptim.jl")
 include("CRNSymOps.jl")
 include("SymLosses.jl")
 include("NetworkTemplates/FullyConnectedNonExplosive.jl")
+include("Plotting.jl")
 #include("CRNExplore.jl")
 #include("SymbolicOps.jl")
-#include("CRNEvo.jl")
+include("CRNevo.jl")
 
 end
