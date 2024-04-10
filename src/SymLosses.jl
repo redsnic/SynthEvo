@@ -1,39 +1,10 @@
-function loss_wrapper(expression, parameters, times)
+## -- Adaptation
+
+function on_species(C, X)
     """
-    Add automatic differentiation to the loss function.
-
-    Args:
-    - `expression`: the expression to differentiate
-    - `parameters`: the parameters of the expression (eg. the dynamics at a give time point)
-    - `times`: the times at which the expression is evaluated
-
-    Returns:
-    - the loss function, a named tuple:
-    - - `fun`: the function to evaluate the loss
-    - - `fun_dx`: the function to evaluate the derivatives of the loss
-    - - `expr`: the expression
-    - - `parameters`: the parameters
-    - - `sub`: the function to evaluate the loss and its derivatives using the efficient computational graph
-    - - `times`: the times at which the dynamics need to be evaluated
-
-    Note: using same names for the variables for the dynamics helps in optimizing the efficiency of the computation and 
-    the visualization of the loss function's expression.
-
-    TODO: now it is actually mandatory to use the same names for the variables for the dynamics accross different components of the loss.
-    check the use of unique in weighted_loss
+    Helper function to restrict the variables X on the species only.
     """
-    dx = der_(expression, parameters)
-
-    fun = eval(build_function(expression, parameters))
-    fun_dx = [eval(eval(build_function(dxi, parameters))[1]) for dxi in dx]
-
-    loss = (fun=fun, fun_dx=fun_dx, expr=expression, parameters=parameters)
-
-    sub = (parameters) -> sub_(loss, parameters)
-
-    loss = (fun=fun, fun_dx=fun_dx, expr=expression, parameters=parameters, sub = sub, times=times)
-
-    return loss
+    return [X[i] for i in 1:C.N]
 end
 
 function adaptation_loss(C, norm, target, t0, t1)
@@ -49,44 +20,16 @@ function adaptation_loss(C, norm, target, t0, t1)
     Returns:
     - expression/variables pair
     """
-    @parameters X_0[1:C.N] X_1[1:C.N]
+    @parameters X_0[1:C.N + length(C.control)] X_1[1:C.N + length(C.control)]
     if norm == 1
         expression = abs(X_1[target] - X_0[target])
     else
         expression = (X_1[target] - X_0[target])^norm
     end
     parameters = [X_0, X_1]
+    variables = [on_species(C, X_0), on_species(C, X_1)]
     times = [t0, t1]
-    return loss_wrapper(expression, parameters, times)
-end
-
-function steady_state_loss(C, norm, t0, t1, t0mdt, t1mdt)
-    """
-    Compute the error of the adaptation. 
-    This is the difference of the change in the target species at the two fix points.
-
-    > parameters: X_0, X_1, X_0mdt, X_1mdt state at t0 and t1
-
-    Args:
-    - `C` : the chemical reaction network
-    - `norm`: the norm to use
-    - `t0`: the time at which the steady state value of the unperturbed system is evaluated (final)
-    - `t1`: the time at which the steady state value of the perturbed system is evaluated (final)
-    - `t0mdt`: the time at which the steady state value of the unperturbed system is evaluated (initial)
-    - `t1mdt`: the time at which the steady state value of the perturbed system is evaluated (initial)
-
-    Returns:
-    - the loss tuple as defined by loss_wrapper
-    """
-    @parameters X_0[1:C.N] X_1[1:C.N] X_0mdt[1:C.N] X_1mdt[1:C.N]
-    if norm == 1
-        expression = abs(X_0[1] - X_0mdt[1]) + abs(X_0[2] - X_0mdt[2]) + abs(X_0[3] - X_0mdt[3]) + abs(X_1[1] - X_1mdt[1]) + abs(X_1[2] - X_1mdt[2]) + abs(X_1[3] - X_1mdt[3])
-    else
-        expression = (X_0[1] - X_0mdt[1])^norm + (X_0[2] - X_0mdt[2])^norm + (X_0[3] - X_0mdt[3])^norm + (X_1[1] - X_1mdt[1])^norm + (X_1[2] - X_1mdt[2])^norm + (X_1[3] - X_1mdt[3])^norm
-    end
-    parameters = [X_0, X_1, X_0mdt, X_1mdt]
-    times = [t0, t1, t0mdt, t1mdt]
-    return loss_wrapper(expression, parameters, times)
+    return loss_wrapper(expression, parameters, variables, times)
 end
 
 function sensitivity_loss(C, norm, target, min_response, t0, t0pdt)
@@ -106,15 +49,64 @@ function sensitivity_loss(C, norm, target, min_response, t0, t0pdt)
     Returns:
     - the loss tuple as defined by loss_wrapper
     """
-    @parameters X_0[1:C.N] X_0pdt[1:C.N] 
+    @parameters X_0[1:C.N + length(C.control)] X_0pdt[1:C.N + length(C.control)] 
     if norm == 1
         expression = min_response - min(abs(X_0pdt[target] - X_0[target]), min_response)
     else
         expression = (min_response - min(abs(X_0pdt[target] - X_0[target]), min_response))^norm
     end
     parameters = [X_0, X_0pdt]
+    variables = [on_species(C, X_0), on_species(C, X_0pdt)]
     times = [t0, t0pdt]
-    return loss_wrapper(expression, parameters, times)
+    return loss_wrapper(expression, parameters, variables, times)
+end
+
+### -- Ultra-sensitivity
+
+function ultrasensitivity_loss(C, norm, t1, target, control, threshold, upper_output_target, lower_output_target)
+    @parameters X_1[1:C.N + length(C.control)]
+    du = X_1[control] - threshold
+    if norm == 1
+        expression = ifelse(du > 0, abs(X_1[target] - upper_output_target), abs(X_1[target] - lower_output_target))
+    else
+        expression = ifelse(du > 0, (X_1[target] - upper_output_target)^norm, (X_1[target] - lower_output_target)^norm)
+    end
+    parameters = [X_1]
+    variables = [on_species(C, X_1)]
+    times = [t1]
+    return loss_wrapper(expression, parameters, variables, times)
+end
+
+### -- General
+
+function steady_state_loss(C, norm, t0, t1, t0mdt, t1mdt)
+    """
+    Compute the error of the adaptation. 
+    This is the difference of the change in the target species at the two fix points.
+
+    > parameters: X_0, X_1, X_0mdt, X_1mdt state at t0 and t1
+
+    Args:
+    - `C` : the chemical reaction network
+    - `norm`: the norm to use
+    - `t0`: the time at which the steady state value of the unperturbed system is evaluated (final)
+    - `t1`: the time at which the steady state value of the perturbed system is evaluated (final)
+    - `t0mdt`: the time at which the steady state value of the unperturbed system is evaluated (initial)
+    - `t1mdt`: the time at which the steady state value of the perturbed system is evaluated (initial)
+
+    Returns:
+    - the loss tuple as defined by loss_wrapper
+    """
+    @parameters X_0[1:C.N + length(C.control)] X_1[1:C.N + length(C.control)] X_0mdt[1:C.N + length(C.control) + length(C.control)] X_1mdt[1:C.N]
+    if norm == 1
+        expression = abs(X_0[1] - X_0mdt[1]) + abs(X_0[2] - X_0mdt[2]) + abs(X_0[3] - X_0mdt[3]) + abs(X_1[1] - X_1mdt[1]) + abs(X_1[2] - X_1mdt[2]) + abs(X_1[3] - X_1mdt[3])
+    else
+        expression = (X_0[1] - X_0mdt[1])^norm + (X_0[2] - X_0mdt[2])^norm + (X_0[3] - X_0mdt[3])^norm + (X_1[1] - X_1mdt[1])^norm + (X_1[2] - X_1mdt[2])^norm + (X_1[3] - X_1mdt[3])^norm
+    end
+    parameters = [X_0, X_1, X_0mdt, X_1mdt]
+    variables = [on_species(C, X_0), on_species(C, X_1), on_species(C, X_0mdt), on_species(C, X_1mdt)]
+    times = [t0, t1, t0mdt, t1mdt]
+    return loss_wrapper(expression, parameters, variables, times)
 end
 
 function regularization_loss(C, norm)
@@ -139,8 +131,9 @@ function regularization_loss(C, norm)
         expression = sum([C.parameters[i] for i in 1:length(C.parameters)].^norm)
     end
     parameters = [C.parameters]
+    variables = [C.parameters]
     times = [nothing]
-    return loss_wrapper(expression, parameters, times)
+    return loss_wrapper(expression, parameters, variables, times)
 end
 
 function weighted_loss(losses, weights)
@@ -159,9 +152,12 @@ function weighted_loss(losses, weights)
     """
     expression = sum([losses[i].expr * weights[i] for i in 1:length(losses)])
     parameters = unique(vcat([losses[i].parameters for i in 1:length(losses)]...))
+    variables = unique(vcat([losses[i].variables for i in 1:length(losses)]...))
     times = unique(vcat([losses[i].times for i in 1:length(losses)]...))
-    return loss_wrapper(expression, parameters, times)
+    return loss_wrapper(expression, parameters, variables, times)
 end
+
+### -- Utils
 
 function eval_loss(C, loss, CRN_parameters, trajectory, compute_derivatives=true)
     """
@@ -206,20 +202,22 @@ function eval_loss(C, loss, CRN_parameters, trajectory, compute_derivatives=true
     return (loss=loss_out.val, gradient=sensitivities)
 end
 
-function der_(expression, parameters)
+function der_(expression, variables)
     """
     Compute the derivatives of the expression wrt the parameters.
     
     NOTE: might assume that the derivatives are wrt the CRN parameters directly or passing trough the ODE.
 
     Args:
+    - `C`: the CRN object
     - `expression`: the expression to differentiate
-    - `parameters`: the parameters of the expression
+    - `variables`: the parameters of the expression that require grad
+    - `on_state`: whether the expression is evaluated on the state or the parameters (avoid deriving the control)
 
     Returns:
     - the (symbolic) derivatives as a nested array
     """
-    dx = [[Symbolics.derivative(expression, x_i) for x_i in x] for x in parameters]
+    dx = [[Symbolics.derivative(expression, x_i) for x_i in x] for x in variables]
     return dx
 end
 
@@ -282,4 +280,46 @@ function merge_solutions(shared_solution, solution, idx, t0)
         end
     end
     return access!
+end
+
+function loss_wrapper(expression, parameters, variables, times)
+    """
+    Add automatic differentiation to the loss function.
+
+    Args:
+    - `expression`: the expression to differentiate
+    - `parameters`: the parameters of the expression (eg. the control at a given time)
+    - `variables`: the variables of the expression (eg. the dynamics at a give time point)
+    - `times`: the times at which the expression is evaluated
+
+    Note: variables must behavior a subset of parameters
+
+    Returns:
+    - the loss function, a named tuple:
+    - - `fun`: the function to evaluate the loss
+    - - `fun_dx`: the function to evaluate the derivatives of the loss
+    - - `expr`: the expression
+    - - `parameters`: the parameters
+    - - `variables`: the variables
+    - - `sub`: the function to evaluate the loss and its derivatives using the efficient computational graph
+    - - `times`: the times at which the dynamics need to be evaluated
+
+    Note: using same names for the variables for the dynamics helps in optimizing the efficiency of the computation and 
+    the visualization of the loss function's expression.
+
+    TODO: now it is actually mandatory to use the same names for the variables for the dynamics accross different components of the loss.
+    check the use of unique in weighted_loss
+    """
+    dx = der_(expression, variables)
+
+    fun = eval(build_function(expression, parameters))
+    fun_dx = [eval(eval(build_function(dxi, parameters))[1]) for dxi in dx]
+
+    loss = (fun=fun, fun_dx=fun_dx, expr=expression, parameters=parameters)
+
+    sub = (parameters) -> sub_(loss, parameters)
+
+    loss = (fun=fun, fun_dx=fun_dx, expr=expression, parameters=parameters, variables=variables, sub = sub, times=times)
+
+    return loss
 end

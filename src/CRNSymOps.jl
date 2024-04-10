@@ -2,6 +2,15 @@ using SimpleDiffEq
 
 
 function sensitivity(C::CRN)
+    """
+    Computes the symbolic sensitivity matrics of a CRN
+
+    Args:
+    - `C`: the CRN model
+
+    Returns:
+    - the sensitivity matrix (symbolic)
+    """
 
     # retrieve the CRN information
     ode, parameters = C.ode, C.parameters
@@ -121,8 +130,6 @@ function sensitivity_from_ode(C::CRN, sol, t)
     end
     return m
 end
-
-
 
 
 function symbolic_gradient_descent(p0, C, gd_options, gd_perturbation_options, tape_checkpoint=nothing, dt=0.1)
@@ -316,39 +323,72 @@ function symbolic_gradient_descent(p0, C, gd_options, gd_perturbation_options, t
     end
 end
 
-# ---- TODO
-
 function joint_jacobian(i, j, jac, initial_conditions)
-    A_ij = substitute(jac[i, j], unsym_dict(initial_conditions))
+    """
+    Compute the (value of the) joint jacobian (derivative of eq i w.r.t. species j) 
+    of a CRN model.
+
+    Args:
+    - `i`: the index of the equation
+    - `j`: the index of the species
+    - `jac`: the jacobian
+    - `initial_conditions`: the initial conditions
+    """
+    A_ij = substitute(jac[i, j], initial_conditions)
     return A_ij
 end
 
-function compute_homeostatic_coefficient(crn, jac, pars, t0 = 10., t1=20, input = 1, perturb = 1.)
+function compute_homeostatic_coefficient(C, pars, input0, input1, t0, t1)
+    """
+    Compute the homeostatic coefficient of a CRN model.
+
+    Args:
+    - `C`: the CRN model
+    - `pars`: the parameters
+    - `input0`: the initial input
+    - `input1`: the final input
+    - `t0`: the initial time
+    - `t1`: the final time
+
+    NOTE: this procedure is very inefficient for multiple calls 
+    as it requires multiple symbolic substitutions. It can be easily optimized if needed.
+
+    Returns:
+    - the homeostatic coefficient (and its components as a named tuple)
+    - - `coefficient`: the homeostatic coefficient
+    - - `A_21`: the A_21 matrix
+    - - `A_32`: the A_32 matrix
+    - - `A_22`: the A_22 matrix
+    - - `A_31`: the A_31 matrix
+    - - `A_22_A_31`: the A_22*A_31 matrix
+    - - `A_21_A_32`: the A_21*A_32 matrix
+    """
         
     opt_pars_v = pars
-    opt_pars_l = assemble_opt_parameters_and_varables(opt_pars_v, N)
+    opt_pars_l = Dict()
+    for i in 1:length(opt_pars_v)
+        opt_pars_l[C.parameters[i]] = opt_pars_v[i]
+    end
 
-    jac = Symbolics.substitute(jac, unsym_dict(opt_pars_l.p))
-                                                                 
-    steady_state_after_perturbation = run_with_fixed_perturbations(crn, opt_pars_v, opt_pars_l, input, [ perturb ], t0, t1)[1](t1)[1:3]
+    # get jacobian
+    jac = Symbolics.substitute(calculate_jacobian(C.ode), (opt_pars_l))
+
+    # simulate
+    base_problem = SynthEvo.make_base_problem(C, C.ode, [0 for _ in 1:C.N], [input0], pars, t0, true, 0.1)
+    shared_solution, solutions = SynthEvo.run_SF_CPU(C, base_problem, t0, t1, [input1], 1e-5, 1e-5, true, 0.25)
+    sol = SynthEvo.merge_solutions(shared_solution, solutions, 1, t0)
+                
+    # prepare dictionaries for substitution
+    steady_state_after_perturbation = sol(t1)[1:C.N]
     steady_state_after_perturbation = [
-        :x_1 => steady_state_after_perturbation[1],
-        :x_2 => steady_state_after_perturbation[2],
-        :x_3 => steady_state_after_perturbation[3]
+        C.species[i] => steady_state_after_perturbation[i] for i in 1:C.N
     ]
 
+    # substitute
     A_21 = joint_jacobian(2, 1, jac, steady_state_after_perturbation)
     A_32 = joint_jacobian(3, 2, jac, steady_state_after_perturbation)
     A_22 = joint_jacobian(2, 2, jac, steady_state_after_perturbation)
     A_31 = joint_jacobian(3, 1, jac, steady_state_after_perturbation)
-
-    # println("A_21 = ", A_21)
-    # println("A_32 = ", A_32)
-    # println("A_22 = ", A_22)
-    # println("A_31 = ", A_31)
-    # println("A_22*A_31 = ", A_22*A_31)
-    # println("A_21*A_32 = ", A_21*A_32)
-    # println("A_22*A_31 - A_21*A_32 = ", A_22*A_31 - A_21*A_32)
 
     return (
         coefficient = A_22*A_31 - A_21*A_32,
@@ -360,11 +400,3 @@ function compute_homeostatic_coefficient(crn, jac, pars, t0 = 10., t1=20, input 
         A_21_A_32 = A_21*A_32
     )
 end
-
-# function compute_homeostatic_coefficient(par_list)
-#     out = []
-#     for pars in par_list
-#         !push(out, compute_homeostatic_coefficient(pars))
-#     end
-#     return out
-# end

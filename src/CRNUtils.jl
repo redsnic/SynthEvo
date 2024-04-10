@@ -78,6 +78,12 @@ end
 # end
 
 function perturbation_events(input, perturbation_list)
+    """
+    Create a list of perturbation events.
+    Basically samples a vector from: input + U(-p/2, p/2)
+
+
+    """
     return [max.(0, [input + rand()*p - p/2]) for p in perturbation_list]
 end
 
@@ -229,4 +235,27 @@ function vec2mat(v)
     - the matrix
     """
     return mapreduce(permutedims, vcat, v)
+end
+
+function sortAndFilterReactions(C, p, threshold)
+    """
+    Sort and filter the reactions based on a threshold.
+
+    Args:
+    - `C`: the CRN
+    - `p`: the parameters
+    - `threshold`: the threshold
+
+    Returns:
+    - the sorted and filtered reactions
+    """
+    indexes = findall((x) -> x>threshold, p).+1
+    picked_reactions = reactions(C.crn)[indexes]
+
+    order = sortperm(p[indexes.-1], rev=true)
+
+    return (
+        reaction_selection = [(p[indexes[i]-1], picked_reactions[i]) for i in order],
+        filtered_parameters = [ x > threshold ? x : 0. for x in p ]
+    )
 end
